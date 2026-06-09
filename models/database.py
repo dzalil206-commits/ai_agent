@@ -156,10 +156,14 @@ async def load_codes_if_empty() -> int:
     if await codes_count() > 0:
         return 0
 
-    # Ищем файл кодов рядом с корнем проекта.
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    path = os.path.join(here, "access_codes.txt")
-    if not os.path.exists(path):
+    # Ищем access_codes.txt: сначала рядом с моделями, потом в рабочей директории.
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "access_codes.txt"),
+        os.path.join(os.getcwd(), "access_codes.txt"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "access_codes.txt"),
+    ]
+    path = next((p for p in candidates if os.path.exists(p)), None)
+    if path is None:
         return 0
 
     with open(path, "r", encoding="utf-8") as f:
