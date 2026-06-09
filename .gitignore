@@ -1,0 +1,16 @@
+# Секреты — НИКОГДА не коммитить!
+.env
+access_codes.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# База данных
+*.db
+
+# Виртуальное окружение
+venv/
+.venv/
+env/
