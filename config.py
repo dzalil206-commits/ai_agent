@@ -42,7 +42,7 @@ def load_config() -> Config:
         db_path=os.getenv("DB_PATH", "bot.db"),
         anthropic_api_key=api_key,
         anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", "").strip() or None,
-        ai_model=os.getenv("AI_MODEL", "claude-opus-4-8"),
+        ai_model=os.getenv("AI_MODEL", "claude-3-5-sonnet-20241022"),
         ai_max_tokens=int(os.getenv("AI_MAX_TOKENS", "2000")),
         ai_daily_limit=int(os.getenv("AI_DAILY_LIMIT", "50")),
     )
