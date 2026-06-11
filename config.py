@@ -15,6 +15,7 @@ class Config:
     db_path: str
     # --- ИИ (Claude API) ---
     anthropic_api_key: str | None   # нет ключа → ИИ-режимы отключены, бот работает
+    anthropic_base_url: str | None  # адрес API реселлера; пусто = официальный Anthropic
     ai_model: str
     ai_max_tokens: int
     ai_daily_limit: int             # запросов к ИИ на юзера в день
@@ -40,6 +41,7 @@ def load_config() -> Config:
         bot_token=bot_token,
         db_path=os.getenv("DB_PATH", "bot.db"),
         anthropic_api_key=api_key,
+        anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", "").strip() or None,
         ai_model=os.getenv("AI_MODEL", "claude-opus-4-8"),
         ai_max_tokens=int(os.getenv("AI_MAX_TOKENS", "2000")),
         ai_daily_limit=int(os.getenv("AI_DAILY_LIMIT", "50")),

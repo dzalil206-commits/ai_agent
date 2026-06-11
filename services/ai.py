@@ -17,8 +17,13 @@ from config import config
 logger = logging.getLogger(__name__)
 
 # Клиент создаётся один раз. Если ключа нет — None, ИИ отключён.
+# base_url нужен для ключей от реселлеров (не sk-ant-...): они работают
+# через свой адрес API, совместимый с Anthropic.
 _client = (
-    anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
+    anthropic.AsyncAnthropic(
+        api_key=config.anthropic_api_key,
+        base_url=config.anthropic_base_url,  # None = официальный api.anthropic.com
+    )
     if config.anthropic_api_key
     else None
 )
