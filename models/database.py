@@ -193,8 +193,9 @@ async def load_codes_if_empty() -> int:
     if await codes_count() > 0:
         return 0
 
-    # Ищем access_codes.txt: сначала рядом с моделями, потом в рабочей директории.
+    # Ищем access_codes.txt: постоянная папка BotHost (/app/data), потом проект.
     candidates = [
+        os.path.join(os.getenv("DATA_DIR", "/app/data"), "access_codes.txt"),
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "access_codes.txt"),
         os.path.join(os.getcwd(), "access_codes.txt"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "access_codes.txt"),

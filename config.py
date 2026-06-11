@@ -6,7 +6,26 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+# 1) .env рядом с проектом (локальный запуск).
 load_dotenv()
+# 2) BotHost: папка /app СТИРАЕТСЯ при синхронизации с GitHub, а /app/data
+#    сохраняется. Держи .env в /app/data — он переживёт обновления кода.
+#    (уже загруженные переменные НЕ перезаписываются — /app/.env главнее)
+_DATA_DIR = os.getenv("DATA_DIR", "/app/data")
+load_dotenv(os.path.join(_DATA_DIR, ".env"))
+
+
+def _resolve_db_path(raw: str) -> str:
+    """
+    Относительный путь БД кладём в DATA_DIR, если он существует (BotHost):
+    /app/bot.db стирается при синхронизации, /app/data/bot.db — нет.
+    Локально (нет /app/data) поведение прежнее: файл рядом с ботом.
+    """
+    if os.path.isabs(raw):
+        return raw
+    if os.path.isdir(_DATA_DIR):
+        return os.path.join(_DATA_DIR, raw)
+    return raw
 
 
 @dataclass
@@ -39,7 +58,7 @@ def load_config() -> Config:
 
     return Config(
         bot_token=bot_token,
-        db_path=os.getenv("DB_PATH", "bot.db"),
+        db_path=_resolve_db_path(os.getenv("DB_PATH", "bot.db")),
         anthropic_api_key=api_key,
         anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", "").strip() or None,
         ai_model=os.getenv("AI_MODEL", "claude-3-5-sonnet-20241022"),
