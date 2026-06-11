@@ -19,13 +19,14 @@ logger = logging.getLogger(__name__)
 # Используем прямые httpx-запросы для реселлеров (обходим специфические
 # заголовки anthropic SDK, которые некоторые реселлеры отклоняют).
 # Для официального api.anthropic.com используем SDK как обычно.
+# Всегда используем прямой httpx для реселлеров — SDK добавляет /v1/messages
+# к base_url, что при base_url=.../v1 даёт двойной /v1 (403 Forbidden).
+# Direct-режим формирует URL сам: base.rstrip(/v1) + /v1/messages.
 _use_direct_http = bool(config.anthropic_base_url)
 
+# SDK используется только без реселлера (официальный Anthropic).
 _client = (
-    anthropic.AsyncAnthropic(
-        api_key=config.anthropic_api_key,
-        base_url=config.anthropic_base_url,
-    )
+    anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
     if config.anthropic_api_key and not _use_direct_http
     else None
 )
