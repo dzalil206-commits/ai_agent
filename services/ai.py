@@ -5,7 +5,6 @@
 История диалога — последние 10 реплик на пользователя (в памяти процесса).
 Дневной лимит запросов проверяется в handlers/.
 """
-import json
 import logging
 
 import anthropic
@@ -16,15 +15,11 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
-# Используем прямые httpx-запросы для реселлеров (обходим специфические
-# заголовки anthropic SDK, которые некоторые реселлеры отклоняют).
-# Для официального api.anthropic.com используем SDK как обычно.
-# Всегда используем прямой httpx для реселлеров — SDK добавляет /v1/messages
-# к base_url, что при base_url=.../v1 даёт двойной /v1 (403 Forbidden).
-# Direct-режим формирует URL сам: base.rstrip(/v1) + /v1/messages.
+# Для реселлеров — всегда прямой httpx: SDK добавляет /v1/messages к base_url,
+# что при base_url=.../v1 даёт двойной /v1 и 403. Direct-режим строит URL сам.
 _use_direct_http = bool(config.anthropic_base_url)
 
-# SDK используется только без реселлера (официальный Anthropic).
+# SDK используется только с официальным Anthropic (без base_url).
 _client = (
     anthropic.AsyncAnthropic(api_key=config.anthropic_api_key)
     if config.anthropic_api_key and not _use_direct_http
@@ -40,6 +35,8 @@ _history: dict[tuple[int, str], list[dict]] = {}
 HISTORY_MAX_MESSAGES = 10
 
 _modes: dict[int, str] = {}
+
+REQUEST_TIMEOUT = 120  # сек; длинный ответ ИИ может генерироваться до минуты
 
 
 def set_mode(user_id: int, mode: str) -> None:
@@ -82,25 +79,79 @@ async def _ask_direct(system: str, messages: list[dict]) -> dict:
         "system":     system,
         "messages":   messages,
     }
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(url, headers=headers, content=json.dumps(payload))
+
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+    except httpx.HTTPError as e:
+        # Сеть/таймаут/DNS — приводим к anthropic-исключению, его ловят handlers/.
+        raise anthropic.APIConnectionError(
+            message=f"Сбой соединения с {url}: {e}",
+            request=httpx.Request("POST", url),
+        ) from e
 
     if resp.status_code == 401:
         raise anthropic.AuthenticationError(
+            message="Неверный API-ключ (401)",
             response=resp, body=resp.text,
-            message="Неверный API-ключ (401)"
         )
     if resp.status_code == 403:
         raise anthropic.PermissionDeniedError(
+            message=f"Запрос заблокирован (403): {resp.text[:200]}",
             response=resp, body=resp.text,
-            message=f"Запрос заблокирован реселлером (403): {resp.text[:200]}"
+        )
+    if resp.status_code == 404:
+        raise anthropic.NotFoundError(
+            message=f"Не найдено (404) — проверь AI_MODEL и BASE_URL: {resp.text[:200]}",
+            response=resp, body=resp.text,
         )
     if resp.status_code != 200:
         raise anthropic.APIStatusError(
             message=f"HTTP {resp.status_code}: {resp.text[:200]}",
             response=resp, body=resp.text,
         )
-    return resp.json()
+
+    try:
+        return resp.json()
+    except ValueError:
+        raise anthropic.APIStatusError(
+            message=f"API вернул не-JSON: {resp.text[:200]}",
+            response=resp, body=resp.text,
+        )
+
+
+def _extract_answer(data: dict) -> tuple[str, str, int, int]:
+    """
+    Достаёт (текст, stop_reason, input_tokens, output_tokens) из ответа.
+    Поддерживает оба формата: Anthropic (content[]) и OpenAI (choices[]) —
+    реселлеры отдают какой-то из них.
+    """
+    usage = data.get("usage") or {}
+
+    if "content" in data:  # Anthropic-формат
+        answer = "".join(
+            b.get("text", "") for b in (data.get("content") or [])
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+        return (
+            answer,
+            data.get("stop_reason") or "",
+            usage.get("input_tokens", 0),
+            usage.get("output_tokens", 0),
+        )
+
+    if "choices" in data:  # OpenAI-совместимый формат
+        choice = (data.get("choices") or [{}])[0]
+        answer = ((choice.get("message") or {}).get("content") or "").strip()
+        return (
+            answer,
+            choice.get("finish_reason") or "",
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+        )
+
+    logger.error("Неизвестный формат ответа API: %s", str(data)[:300])
+    return "", "", 0, 0
 
 
 async def ask(user_id: int, mode: str, text: str) -> str:
@@ -116,29 +167,28 @@ async def ask(user_id: int, mode: str, text: str) -> str:
     history.append({"role": "user", "content": text})
     system = SYSTEM_BY_MODE.get(mode, prompts.ASSISTANT_SYSTEM)
 
-    if _use_direct_http:
-        data = await _ask_direct(system, list(history))
-        content_blocks = data.get("content", [])
-        answer = "".join(
-            b["text"] for b in content_blocks if b.get("type") == "text"
-        ).strip()
-        stop_reason = data.get("stop_reason", "")
-        usage = data.get("usage", {})
-        in_tok  = usage.get("input_tokens", 0)
-        out_tok = usage.get("output_tokens", 0)
-    else:
-        response = await _client.messages.create(
-            model=config.ai_model,
-            max_tokens=config.ai_max_tokens,
-            system=system,
-            messages=list(history),
-        )
-        answer = "".join(
-            block.text for block in response.content if block.type == "text"
-        ).strip()
-        stop_reason = response.stop_reason
-        in_tok  = response.usage.input_tokens
-        out_tok = response.usage.output_tokens
+    try:
+        if _use_direct_http:
+            data = await _ask_direct(system, list(history))
+            answer, stop_reason, in_tok, out_tok = _extract_answer(data)
+        else:
+            response = await _client.messages.create(
+                model=config.ai_model,
+                max_tokens=config.ai_max_tokens,
+                system=system,
+                messages=list(history),
+            )
+            answer = "".join(
+                block.text for block in response.content if block.type == "text"
+            ).strip()
+            stop_reason = response.stop_reason
+            in_tok  = response.usage.input_tokens
+            out_tok = response.usage.output_tokens
+    except Exception:
+        # Запрос не удался — убираем вопрос из истории, чтобы при повторе
+        # не накапливались дубли подряд идущих user-сообщений.
+        history.pop()
+        raise
 
     if stop_reason == "refusal" or not answer:
         history.pop()
