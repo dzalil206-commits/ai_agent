@@ -16,6 +16,7 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 import texts
+from keyboards import main_menu
 from models import database as db
 
 router = Router()
@@ -40,7 +41,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
 
     if await db.is_activated(message.from_user.id):
         await message.answer(texts.ALREADY_ACTIVATED)
-        await message.answer(texts.ABOUT)
+        await message.answer(texts.MAIN_MENU, reply_markup=main_menu())
     else:
         await message.answer(texts.GREETING)
 
@@ -94,11 +95,10 @@ async def handle_text(message: Message) -> None:
 
     if result == "ok":
         await message.answer(texts.TOKEN_OK)
-        await message.answer(texts.ABOUT)
+        await message.answer(texts.MAIN_MENU, reply_markup=main_menu())
     elif result == "used_by_you":
-        # Тот же юзер вводит свой же код повторно — просто впускаем.
         await message.answer(texts.ALREADY_ACTIVATED)
-        await message.answer(texts.ABOUT)
+        await message.answer(texts.MAIN_MENU, reply_markup=main_menu())
     elif result == "used":
         await message.answer(texts.CODE_USED_BY_OTHER)
     else:  # not_found
