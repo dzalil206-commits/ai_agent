@@ -107,12 +107,24 @@ async def _handle_ai_chat(message: Message) -> None:
 
     try:
         answer = await ai.ask(user_id, mode, message.text)
-    except anthropic.AuthenticationError:
-        logger.error("Claude API: неверный ANTHROPIC_API_KEY")
+    except anthropic.AuthenticationError as e:
+        logger.error("Claude API 401 AuthenticationError: %s", e)
         await message.answer(texts.AI_NOT_CONFIGURED)
         return
-    except anthropic.APIError:
-        logger.exception("Claude API: ошибка запроса")
+    except anthropic.NotFoundError as e:
+        logger.error("Claude API 404 NotFoundError (модель не найдена?): %s", e)
+        await message.answer(texts.AI_ERROR)
+        return
+    except anthropic.APIStatusError as e:
+        logger.error("Claude API HTTP %s: %s", e.status_code, e.message)
+        await message.answer(texts.AI_ERROR)
+        return
+    except anthropic.APIConnectionError as e:
+        logger.error("Claude API ConnectionError (сеть/base_url?): %s", e)
+        await message.answer(texts.AI_ERROR)
+        return
+    except anthropic.APIError as e:
+        logger.error("Claude API неизвестная ошибка (%s): %s", type(e).__name__, e)
         await message.answer(texts.AI_ERROR)
         return
 
