@@ -54,6 +54,17 @@ async def init_db() -> None:
             )
             """
         )
+        # Учёт ИИ-запросов (дневной лимит на юзера).
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_usage (
+                user_id     INTEGER NOT NULL,
+                day         TEXT NOT NULL,
+                count       INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, day)
+            )
+            """
+        )
         await db.commit()
 
 
@@ -143,6 +154,32 @@ async def try_activate_with_code(user_id: int, code: str):
         )
         await db.commit()
         return "ok"
+
+
+# ---------- Учёт ИИ-запросов ----------
+
+async def ai_usage_today(user_id: int) -> int:
+    """Сколько ИИ-запросов юзер сделал сегодня (по UTC)."""
+    async with aiosqlite.connect(config.db_path) as db:
+        async with db.execute(
+            "SELECT count FROM ai_usage WHERE user_id = ? AND day = date('now')",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def ai_usage_increment(user_id: int) -> None:
+    """Увеличивает счётчик ИИ-запросов юзера за сегодня."""
+    async with aiosqlite.connect(config.db_path) as db:
+        await db.execute(
+            """
+            INSERT INTO ai_usage (user_id, day, count) VALUES (?, date('now'), 1)
+            ON CONFLICT (user_id, day) DO UPDATE SET count = count + 1
+            """,
+            (user_id,),
+        )
+        await db.commit()
 
 
 async def load_codes_if_empty() -> int:

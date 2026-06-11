@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery
 
 import texts
 from keyboards import main_menu, platforms_menu, back_to_menu
+from services import ai
 
 router = Router()
 
@@ -15,7 +16,8 @@ PLATFORM_NAMES = {
 
 @router.callback_query(F.data == "menu_back")
 async def cb_back(call: CallbackQuery) -> None:
-    await call.message.edit_text(texts.MAIN_MENU, reply_markup=main_menu())
+    ai.clear_mode(call.from_user.id)
+    await call.message.edit_text(texts.ABOUT, reply_markup=main_menu())
 
 
 @router.callback_query(F.data == "menu_mailings")
@@ -39,9 +41,17 @@ async def cb_stats(call: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu_ai_clients")
 async def cb_ai_clients(call: CallbackQuery) -> None:
-    await call.message.edit_text(texts.AI_CLIENTS_STUB, reply_markup=back_to_menu())
+    if not ai.is_configured():
+        await call.message.edit_text(texts.AI_NOT_CONFIGURED, reply_markup=back_to_menu())
+        return
+    ai.set_mode(call.from_user.id, "sales")
+    await call.message.edit_text(texts.AI_CLIENTS_ON, reply_markup=back_to_menu())
 
 
 @router.callback_query(F.data == "menu_ai_assistant")
 async def cb_ai_assistant(call: CallbackQuery) -> None:
-    await call.message.edit_text(texts.AI_ASSISTANT_STUB, reply_markup=back_to_menu())
+    if not ai.is_configured():
+        await call.message.edit_text(texts.AI_NOT_CONFIGURED, reply_markup=back_to_menu())
+        return
+    ai.set_mode(call.from_user.id, "assistant")
+    await call.message.edit_text(texts.AI_ASSISTANT_ON, reply_markup=back_to_menu())

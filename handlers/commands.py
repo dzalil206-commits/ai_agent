@@ -11,13 +11,22 @@
    - кода нет        → отказ.
 4. После активации юзер узнаётся по Telegram ID и заходит без кода.
 """
+import logging
+
+import anthropic
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 import texts
+from config import config
 from keyboards import main_menu
 from models import database as db
+from services import ai
+
+logger = logging.getLogger(__name__)
+
+TG_MESSAGE_LIMIT = 4000  # лимит Telegram 4096, берём с запасом
 
 router = Router()
 
@@ -40,8 +49,9 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         return
 
     if await db.is_activated(message.from_user.id):
+        ai.clear_mode(message.from_user.id)  # /start = выход из ИИ-режима в меню
         await message.answer(texts.ALREADY_ACTIVATED)
-        await message.answer(texts.MAIN_MENU, reply_markup=main_menu())
+        await message.answer(texts.ABOUT, reply_markup=main_menu())
     else:
         await message.answer(texts.GREETING)
 
@@ -76,18 +86,58 @@ async def cmd_stats(message: Message) -> None:
     await message.answer(texts.stats_message())
 
 
+async def _handle_ai_chat(message: Message) -> None:
+    """Текст от активированного юзера → ответ ИИ (если выбран режим)."""
+    user_id = message.from_user.id
+
+    mode = ai.get_mode(user_id)
+    if mode is None:
+        await message.answer(texts.AI_NOT_READY)
+        return
+
+    if not ai.is_configured():
+        await message.answer(texts.AI_NOT_CONFIGURED)
+        return
+
+    if await db.ai_usage_today(user_id) >= config.ai_daily_limit:
+        await message.answer(texts.AI_LIMIT_REACHED)
+        return
+
+    await message.bot.send_chat_action(message.chat.id, "typing")
+
+    try:
+        answer = await ai.ask(user_id, mode, message.text)
+    except anthropic.AuthenticationError:
+        logger.error("Claude API: неверный ANTHROPIC_API_KEY")
+        await message.answer(texts.AI_NOT_CONFIGURED)
+        return
+    except anthropic.APIError:
+        logger.exception("Claude API: ошибка запроса")
+        await message.answer(texts.AI_ERROR)
+        return
+
+    await db.ai_usage_increment(user_id)
+
+    if not answer:
+        await message.answer(texts.AI_REFUSED)
+        return
+
+    # Telegram не принимает сообщения длиннее 4096 символов — режем.
+    for start in range(0, len(answer), TG_MESSAGE_LIMIT):
+        await message.answer(answer[start:start + TG_MESSAGE_LIMIT])
+
+
 @router.message(F.text)
 async def handle_text(message: Message) -> None:
     """
     Любой текст без команды.
     - Если юзер не активирован — считаем это попыткой ввести код доступа.
-    - Если активирован — пока заглушка (на Этапе 2 здесь будет ИИ).
+    - Если активирован — отвечает ИИ в выбранном режиме.
     """
     await db.ensure_user(message.from_user.id, message.from_user.username)
 
     if await db.is_activated(message.from_user.id):
-        # Активирован, но это просто текст — ИИ ещё не подключён.
-        await message.answer(texts.AI_NOT_READY)
+        await _handle_ai_chat(message)
         return
 
     # Не активирован — пробуем введённый текст как код доступа.
@@ -95,10 +145,10 @@ async def handle_text(message: Message) -> None:
 
     if result == "ok":
         await message.answer(texts.TOKEN_OK)
-        await message.answer(texts.MAIN_MENU, reply_markup=main_menu())
+        await message.answer(texts.ABOUT, reply_markup=main_menu())
     elif result == "used_by_you":
         await message.answer(texts.ALREADY_ACTIVATED)
-        await message.answer(texts.MAIN_MENU, reply_markup=main_menu())
+        await message.answer(texts.ABOUT, reply_markup=main_menu())
     elif result == "used":
         await message.answer(texts.CODE_USED_BY_OTHER)
     else:  # not_found
