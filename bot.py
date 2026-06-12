@@ -36,6 +36,15 @@ async def main() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
+    # Startup diagnostics — visible in BotHost logs
+    logging.info("=== КОНФИГУРАЦИЯ ===")
+    logging.info("DB path:            %s", config.db_path)
+    logging.info("AI model:           %s", config.ai_model)
+    logging.info("ANTHROPIC_API_KEY:  %s", "ЗАДАН ✅" if config.anthropic_api_key else "НЕ ЗАДАН ❌")
+    logging.info("ANTHROPIC_BASE_URL: %s", config.anthropic_base_url or "(официальный Anthropic)")
+    logging.info("DATA_DIR:           %s", os.getenv("DATA_DIR", "/app/data"))
+    logging.info("====================")
+
     await init_db()
     loaded = await load_codes_if_empty()
     if loaded:

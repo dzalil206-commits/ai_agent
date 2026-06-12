@@ -78,6 +78,24 @@ async def cmd_help(message: Message) -> None:
     await message.answer(texts.HELP)
 
 
+@router.message(Command("status"))
+async def cmd_status(message: Message) -> None:
+    """Показывает текущее состояние конфигурации (для диагностики)."""
+    import os
+    from services.ai import _use_direct_http
+    lines = [
+        "⚙️ <b>Статус конфигурации</b>",
+        "",
+        f"API-ключ: {'✅ задан' if config.anthropic_api_key else '❌ НЕ ЗАДАН'}",
+        f"Модель: <code>{config.ai_model}</code>",
+        f"Base URL: <code>{config.anthropic_base_url or 'официальный Anthropic'}</code>",
+        f"HTTP-режим: {'прямой httpx' if _use_direct_http else 'Anthropic SDK'}",
+        f"DATA_DIR: <code>{os.getenv('DATA_DIR', '/app/data')}</code>",
+        f"DB: <code>{config.db_path}</code>",
+    ]
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
 @router.message(Command("stats"))
 async def cmd_stats(message: Message) -> None:
     if not await db.is_activated(message.from_user.id):
