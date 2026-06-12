@@ -34,14 +34,16 @@ for p in ("/app/data/.env", os.path.join(os.path.dirname(os.path.abspath(__file_
     env.update(_read_env(p))
 env.update(os.environ)  # реальное окружение главнее
 
-KEY = (env.get("ANTHROPIC_API_KEY") or "").strip()
-BASE = (env.get("ANTHROPIC_BASE_URL") or "https://api.anthropic.com/v1").strip().rstrip("/")
+KEY   = (env.get("ANTHROPIC_API_KEY") or "").strip()
+BASE  = (env.get("ANTHROPIC_BASE_URL") or "https://api.anthropic.com/v1").strip().rstrip("/")
 MODEL = (env.get("AI_MODEL") or "claude-sonnet-4-6").strip()
+PROXY = (env.get("PROXY_URL") or "").strip() or None
 
 print("=" * 60)
 print("BASE :", BASE)
 print("MODEL:", MODEL)
 print("KEY  :", (KEY[:8] + "..." + KEY[-4:]) if KEY else "(ПУСТО!)")
+print("PROXY:", PROXY or "(не задан)")
 print("=" * 60)
 
 if not KEY:
@@ -52,6 +54,17 @@ if not KEY:
 def post(url, headers, body):
     data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    if PROXY:
+        from urllib.request import ProxyHandler, build_opener
+        scheme = PROXY.split("://")[0]
+        opener = build_opener(ProxyHandler({scheme: PROXY, "https": PROXY}))
+        try:
+            with opener.open(req, timeout=60) as r:
+                return r.status, r.read(500).decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(500).decode("utf-8", "replace")
+        except Exception as e:  # noqa: BLE001
+            return "ERR", str(e)[:400]
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             return r.status, r.read(500).decode("utf-8", "replace")

@@ -38,6 +38,7 @@ class Config:
     ai_model: str
     ai_max_tokens: int
     ai_daily_limit: int             # запросов к ИИ на юзера в день
+    proxy_url: str | None           # http://user:pass@host:port или socks5://...
 
 
 def load_config() -> Config:
@@ -64,6 +65,7 @@ def load_config() -> Config:
         ai_model=os.getenv("AI_MODEL", "claude-3-5-sonnet-20241022"),
         ai_max_tokens=int(os.getenv("AI_MAX_TOKENS", "2000")),
         ai_daily_limit=int(os.getenv("AI_DAILY_LIMIT", "50")),
+        proxy_url=os.getenv("PROXY_URL", "").strip() or None,
     )
 
 

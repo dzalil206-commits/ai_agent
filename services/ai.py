@@ -117,8 +117,9 @@ _BUILDERS = {
 
 
 async def _post(url: str, headers: dict, payload: dict) -> httpx.Response:
+    proxy = config.proxy_url  # None = без прокси; задаётся через PROXY_URL в .env
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, proxy=proxy) as client:
             return await client.post(url, headers=headers, json=payload)
     except httpx.HTTPError as e:
         raise anthropic.APIConnectionError(
