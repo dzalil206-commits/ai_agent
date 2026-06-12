@@ -69,7 +69,8 @@ async def _ask_direct(system: str, messages: list[dict]) -> dict:
     base = (config.anthropic_base_url or "https://api.anthropic.com/v1").rstrip("/")
     url = f"{base}/messages"
     headers = {
-        "x-api-key": config.anthropic_api_key,
+        "x-api-key":     config.anthropic_api_key,
+        "Authorization": f"Bearer {config.anthropic_api_key}",
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
