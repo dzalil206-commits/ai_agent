@@ -2,18 +2,30 @@
 Работа с базой данных (SQLite через aiosqlite).
 
 Таблицы:
-- users         — пользователи Telegram и флаг активации
-- access_codes  — 5000 одноразовых кодов доступа (формат WRN-XXXX-XXXX-XXXX-XXXX)
-- sessions      — задел под учёт рассылок (Этап 4)
+- users          — пользователи Telegram, флаг активации и тариф
+- access_codes   — одноразовые коды доступа; тариф зашит в префиксе кода
+- ai_usage       — дневной счётчик ИИ-запросов
+- mailing_usage  — месячный счётчик рассылок
+- sessions       — задел под учёт рассылок (Этап 4)
 
 Логика кодов:
 - код одноразовый: при активации привязывается к user_id (used_by)
 - повторно тот же код использовать нельзя
+- тариф определяется по префиксу кода (STD-/PRO-/BIZ-/PREM-/MAST-)
 - активированный юзер узнаётся по Telegram ID и заходит без повторного ввода
 """
 import aiosqlite
 
+import tariffs
 from config import config
+
+
+async def _ensure_column(db, table: str, column: str, decl: str) -> None:
+    """Добавляет колонку, если её ещё нет (миграция старых баз без простоя)."""
+    async with db.execute(f"PRAGMA table_info({table})") as cursor:
+        cols = {row[1] for row in await cursor.fetchall()}
+    if column not in cols:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 async def init_db() -> None:
@@ -26,6 +38,7 @@ async def init_db() -> None:
                 username    TEXT,
                 activated   INTEGER NOT NULL DEFAULT 0,
                 code_used   TEXT,
+                tariff      TEXT,
                 created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -34,8 +47,20 @@ async def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS access_codes (
                 code        TEXT PRIMARY KEY,
+                tariff      TEXT,
                 used_by     INTEGER,
                 used_at     TIMESTAMP
+            )
+            """
+        )
+        # Месячный счётчик рассылок (лимит зависит от тарифа).
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mailing_usage (
+                user_id     INTEGER NOT NULL,
+                month       TEXT NOT NULL,
+                count       INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, month)
             )
             """
         )
@@ -65,6 +90,9 @@ async def init_db() -> None:
             )
             """
         )
+        # Миграция старых баз: добавляем колонку tariff, если её ещё нет.
+        await _ensure_column(db, "users", "tariff", "TEXT")
+        await _ensure_column(db, "access_codes", "tariff", "TEXT")
         await db.commit()
 
 
@@ -102,13 +130,14 @@ async def codes_count() -> int:
 async def load_codes(codes) -> int:
     """
     Загружает список кодов в базу (однократно).
+    Тариф каждого кода определяется по его префиксу (STD-/PRO-/BIZ-/PREM-/MAST-).
     Уже существующие коды игнорируются. Возвращает, сколько добавлено.
     """
     async with aiosqlite.connect(config.db_path) as db:
         before = (await (await db.execute("SELECT COUNT(*) FROM access_codes")).fetchone())[0]
         await db.executemany(
-            "INSERT OR IGNORE INTO access_codes (code) VALUES (?)",
-            [(c,) for c in codes],
+            "INSERT OR IGNORE INTO access_codes (code, tariff) VALUES (?, ?)",
+            [(c, tariffs.tariff_for_code(c)) for c in codes],
         )
         await db.commit()
         after = (await (await db.execute("SELECT COUNT(*) FROM access_codes")).fetchone())[0]
@@ -129,31 +158,44 @@ async def try_activate_with_code(user_id: int, code: str):
 
     async with aiosqlite.connect(config.db_path) as db:
         async with db.execute(
-            "SELECT used_by FROM access_codes WHERE code = ?", (code,)
+            "SELECT used_by, tariff FROM access_codes WHERE code = ?", (code,)
         ) as cursor:
             row = await cursor.fetchone()
 
         if row is None:
             return "not_found"
 
-        used_by = row[0]
+        used_by, tariff = row
 
         if used_by is not None:
             if used_by == user_id:
                 return "used_by_you"
             return "used"
 
-        # Код свободен — привязываем к юзеру и активируем.
+        # Тариф мог не записаться у легаси-кодов — добираем из префикса.
+        tariff = tariff or tariffs.tariff_for_code(code)
+
+        # Код свободен — привязываем к юзеру, активируем и ставим тариф.
         await db.execute(
             "UPDATE access_codes SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE code = ?",
             (user_id, code),
         )
         await db.execute(
-            "UPDATE users SET activated = 1, code_used = ? WHERE user_id = ?",
-            (code, user_id),
+            "UPDATE users SET activated = 1, code_used = ?, tariff = ? WHERE user_id = ?",
+            (code, tariff, user_id),
         )
         await db.commit()
         return "ok"
+
+
+async def get_user_tariff(user_id: int) -> str:
+    """Ключ тарифа юзера. Если не задан (легаси) — тариф по умолчанию."""
+    async with aiosqlite.connect(config.db_path) as db:
+        async with db.execute(
+            "SELECT tariff FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    return (row[0] if row and row[0] else tariffs.DEFAULT_TARIFF)
 
 
 # ---------- Учёт ИИ-запросов ----------
@@ -178,6 +220,33 @@ async def ai_usage_increment(user_id: int) -> None:
             ON CONFLICT (user_id, day) DO UPDATE SET count = count + 1
             """,
             (user_id,),
+        )
+        await db.commit()
+
+
+# ---------- Учёт рассылок (месячный лимит) ----------
+
+async def mailing_usage_month(user_id: int) -> int:
+    """Сколько рассылок юзер отправил в текущем месяце (UTC, YYYY-MM)."""
+    async with aiosqlite.connect(config.db_path) as db:
+        async with db.execute(
+            "SELECT count FROM mailing_usage WHERE user_id = ? AND month = strftime('%Y-%m','now')",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def mailing_usage_add(user_id: int, n: int = 1) -> None:
+    """Увеличивает месячный счётчик рассылок юзера на n."""
+    async with aiosqlite.connect(config.db_path) as db:
+        await db.execute(
+            """
+            INSERT INTO mailing_usage (user_id, month, count)
+            VALUES (?, strftime('%Y-%m','now'), ?)
+            ON CONFLICT (user_id, month) DO UPDATE SET count = count + ?
+            """,
+            (user_id, n, n),
         )
         await db.commit()
 

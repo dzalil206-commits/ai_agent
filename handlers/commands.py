@@ -18,6 +18,7 @@ from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+import tariffs
 import texts
 from config import config
 from keyboards import main_menu
@@ -96,6 +97,32 @@ async def cmd_status(message: Message) -> None:
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+@router.message(Command("tariff"))
+async def cmd_tariff(message: Message) -> None:
+    """Показывает тариф юзера и остаток лимитов на сегодня/месяц."""
+    user_id = message.from_user.id
+    if not await db.is_activated(user_id):
+        await message.answer(texts.NEED_ACTIVATION)
+        return
+
+    t = tariffs.get_tariff(await db.get_user_tariff(user_id))
+    ai_used = await db.ai_usage_today(user_id)
+    mail_used = await db.mailing_usage_month(user_id)
+
+    ai_line = "∞ (безлимит)" if t.ai_daily is None else f"{ai_used} / {t.ai_daily}"
+    mail_line = "∞ (безлимит)" if t.mailings_month is None else f"{mail_used} / {t.mailings_month}"
+    price_line = "служебный" if t.price is None else f"{t.price} ₽/мес"
+
+    lines = [
+        f"💼 <b>Тариф: {t.title}</b> ({price_line})",
+        "",
+        f"🤖 ИИ сегодня: {ai_line}",
+        f"📦 Рассылки за месяц: {mail_line}",
+        f"⏱ Темп отправки: {tariffs.pace_human(t)}",
+    ]
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
 @router.message(Command("stats"))
 async def cmd_stats(message: Message) -> None:
     if not await db.is_activated(message.from_user.id):
@@ -117,7 +144,8 @@ async def _handle_ai_chat(message: Message) -> None:
         await message.answer(texts.AI_NOT_CONFIGURED)
         return
 
-    if await db.ai_usage_today(user_id) >= config.ai_daily_limit:
+    tariff = tariffs.get_tariff(await db.get_user_tariff(user_id))
+    if tariff.ai_daily is not None and await db.ai_usage_today(user_id) >= tariff.ai_daily:
         await message.answer(texts.AI_LIMIT_REACHED)
         return
 
