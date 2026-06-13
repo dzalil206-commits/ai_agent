@@ -1,6 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
+import states
 import texts
 from keyboards import main_menu, platforms_menu, back_to_menu
 from services import ai
@@ -17,7 +18,15 @@ PLATFORM_NAMES = {
 @router.callback_query(F.data == "menu_back")
 async def cb_back(call: CallbackQuery) -> None:
     ai.clear_mode(call.from_user.id)
+    states.clear_awaiting_code(call.from_user.id)
     await call.message.edit_text(texts.ABOUT, reply_markup=main_menu())
+
+
+@router.callback_query(F.data == "menu_change_tariff")
+async def cb_change_tariff(call: CallbackQuery) -> None:
+    ai.clear_mode(call.from_user.id)            # выходим из ИИ-режима
+    states.set_awaiting_code(call.from_user.id)  # следующий текст = новый токен
+    await call.message.edit_text(texts.CHANGE_TARIFF_PROMPT, reply_markup=back_to_menu())
 
 
 @router.callback_query(F.data == "menu_mailings")

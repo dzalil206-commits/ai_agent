@@ -18,6 +18,7 @@ from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
+import states
 import tariffs
 import texts
 from config import config
@@ -222,13 +223,20 @@ async def handle_text(message: Message) -> None:
     - Активирован, не код → отвечает ИИ в выбранном режиме.
     - Не активирован, не код → подсказка ввести код.
     """
-    await db.ensure_user(message.from_user.id, message.from_user.username)
+    user_id = message.from_user.id
+    await db.ensure_user(user_id, message.from_user.username)
+
+    # Нажал «Сменить тариф» → следующий текст считаем новым токеном.
+    if states.is_awaiting_code(user_id):
+        states.clear_awaiting_code(user_id)
+        await _redeem_code(message, message.text)
+        return
 
     if tariffs.looks_like_code(message.text):
         await _redeem_code(message, message.text)
         return
 
-    if await db.is_activated(message.from_user.id):
+    if await db.is_activated(user_id):
         await _handle_ai_chat(message)
         return
 

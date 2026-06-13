@@ -175,6 +175,13 @@ async def try_activate_with_code(user_id: int, code: str):
         # Тариф мог не записаться у легаси-кодов — добираем из префикса.
         tariff = tariff or tariffs.tariff_for_code(code)
 
+        # Старый код юзера (если был) — после смены тарифа его стираем.
+        async with db.execute(
+            "SELECT code_used FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            prev = await cursor.fetchone()
+        old_code = prev[0] if prev else None
+
         # Код свободен — привязываем к юзеру, активируем и ставим тариф.
         await db.execute(
             "UPDATE access_codes SET used_by = ?, used_at = CURRENT_TIMESTAMP WHERE code = ?",
@@ -184,6 +191,14 @@ async def try_activate_with_code(user_id: int, code: str):
             "UPDATE users SET activated = 1, code_used = ?, tariff = ? WHERE user_id = ?",
             (code, tariff, user_id),
         )
+
+        # Стираем старый код юзера (если это была реальная смена на другой код).
+        if old_code and old_code != code:
+            await db.execute(
+                "DELETE FROM access_codes WHERE code = ? AND used_by = ?",
+                (old_code, user_id),
+            )
+
         await db.commit()
         return "ok"
 

@@ -8,6 +8,7 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.button(text="📊 Статистика",                callback_data="menu_stats")
     builder.button(text="💬 ИИ общение с клиентами",    callback_data="menu_ai_clients")
     builder.button(text="🤖 ИИ ассистент",              callback_data="menu_ai_assistant")
+    builder.button(text="🔄 Сменить тариф",             callback_data="menu_change_tariff")
     builder.adjust(1)
     return builder.as_markup()
 

@@ -34,8 +34,16 @@ ALREADY_ON_THIS_CODE = (
 def tariff_switched(title: str) -> str:
     return (
         f"Тариф обновлён ✅ Теперь у тебя: <b>{title}</b>\n"
-        "Подробности и лимиты: /tariff"
+        "Старый токен стёрт. Подробности и лимиты: /tariff"
     )
+
+
+CHANGE_TARIFF_PROMPT = (
+    "🔄 Смена тарифа\n\n"
+    "Введи новый токен — я переключу тебя на соответствующий тариф, "
+    "а старый токен будет стёрт.\n\n"
+    "Формат: PREFIX-XXXX-XXXX-XXXX"
+)
 
 NEED_ACTIVATION = (
     "Сначала активируй меня 🔒\n"
