@@ -251,25 +251,29 @@ async def mailing_usage_add(user_id: int, n: int = 1) -> None:
         await db.commit()
 
 
-async def load_codes_if_empty() -> int:
-    """
-    Если таблица кодов пуста — загружает коды из файла access_codes.txt
-    (лежит рядом с проектом). Возвращает количество добавленных кодов.
-    Используется для автозагрузки на хостинге при первом старте.
-    """
+def _find_codes_file():
+    """Ищет access_codes.txt: постоянная папка BotHost (/app/data), потом проект."""
     import os
 
-    if await codes_count() > 0:
-        return 0
-
-    # Ищем access_codes.txt: постоянная папка BotHost (/app/data), потом проект.
     candidates = [
         os.path.join(os.getenv("DATA_DIR", "/app/data"), "access_codes.txt"),
         os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "access_codes.txt"),
         os.path.join(os.getcwd(), "access_codes.txt"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "access_codes.txt"),
     ]
-    path = next((p for p in candidates if os.path.exists(p)), None)
+    return next((p for p in candidates if os.path.exists(p)), None)
+
+
+async def sync_codes_from_file() -> int:
+    """
+    Домерживает коды из access_codes.txt в базу при КАЖДОМ старте.
+    Новые коды добавляются, существующие игнорируются (INSERT OR IGNORE),
+    использованные коды не трогаются. Возвращает, сколько добавлено.
+
+    Это позволяет докидывать новые тарифные коды (STD-/PRO-/BIZ-/PREM-/MAST-)
+    в уже работающую базу — просто обнови файл и перезапусти бота.
+    """
+    path = _find_codes_file()
     if path is None:
         return 0
 
@@ -280,3 +284,10 @@ async def load_codes_if_empty() -> int:
         return 0
 
     return await load_codes(codes)
+
+
+async def load_codes_if_empty() -> int:
+    """Совместимость: первичная загрузка кодов, если база пуста."""
+    if await codes_count() > 0:
+        return 0
+    return await sync_codes_from_file()

@@ -27,7 +27,7 @@ from aiogram import Bot, Dispatcher
 from config import config
 from handlers.commands import router as commands_router
 from handlers.callbacks import router as callbacks_router
-from models.database import init_db, load_codes_if_empty
+from models.database import init_db, sync_codes_from_file
 
 
 async def main() -> None:
@@ -46,9 +46,9 @@ async def main() -> None:
     logging.info("====================")
 
     await init_db()
-    loaded = await load_codes_if_empty()
+    loaded = await sync_codes_from_file()
     if loaded:
-        logging.info("Загружено кодов доступа в базу: %d", loaded)
+        logging.info("Домержено новых кодов доступа в базу: %d", loaded)
 
     bot = Bot(token=config.bot_token)
     dp = Dispatcher()
