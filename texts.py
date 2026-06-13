@@ -25,6 +25,18 @@ CODE_USED_BY_OTHER = (
 
 ALREADY_ACTIVATED = "Твой профиль уже активирован ✅ Система полностью готова к работе."
 
+ALREADY_ON_THIS_CODE = (
+    "Этот код уже привязан к твоему аккаунту ✅\n"
+    "Тариф не изменился. Проверить лимиты: /tariff"
+)
+
+
+def tariff_switched(title: str) -> str:
+    return (
+        f"Тариф обновлён ✅ Теперь у тебя: <b>{title}</b>\n"
+        "Подробности и лимиты: /tariff"
+    )
+
 NEED_ACTIVATION = (
     "Сначала активируй меня 🔒\n"
     "Введи свой код доступа в формате WRN-XXX-XXX-XXX-XXX."

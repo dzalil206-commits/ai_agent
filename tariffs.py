@@ -17,6 +17,7 @@
 - темп       — пауза между сообщениями в секундах (антибан аккаунтов)
 """
 from dataclasses import dataclass
+import re
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,16 @@ def tariff_for_code(code: str) -> str:
 def get_tariff(key: str | None) -> Tariff:
     """Возвращает тариф по ключу. Пустой/неизвестный ключ → DEFAULT_TARIFF."""
     return TARIFFS.get(key or DEFAULT_TARIFF, TARIFFS[DEFAULT_TARIFF])
+
+
+# Известные префиксы кодов + легаси WRN (старые коды до тарифной системы).
+_CODE_PREFIXES = [t.prefix for t in TARIFFS.values()] + ["WRN"]
+_CODE_RE = re.compile(r"^(" + "|".join(_CODE_PREFIXES) + r")(-[A-Z0-9]{2,6}){2,4}$")
+
+
+def looks_like_code(text: str) -> bool:
+    """Похож ли текст на код доступа (PREFIX-XXXX-XXXX-XXXX). Регистр игнорим."""
+    return bool(_CODE_RE.match(text.strip().upper()))
 
 
 def pace_human(tariff: Tariff) -> str:

@@ -185,29 +185,52 @@ async def _handle_ai_chat(message: Message) -> None:
         await message.answer(answer[start:start + TG_MESSAGE_LIMIT])
 
 
+async def _redeem_code(message: Message, code: str) -> None:
+    """
+    Активация по коду ИЛИ смена тарифа активированным юзером.
+    Тариф берётся из префикса кода и проставляется юзеру.
+    """
+    user_id = message.from_user.id
+    was_activated = await db.is_activated(user_id)
+    result = await db.try_activate_with_code(user_id, code)
+
+    if result == "ok":
+        t = tariffs.get_tariff(await db.get_user_tariff(user_id))
+        if was_activated:
+            # Смена тарифа на лету — меню уже видел, показываем только итог.
+            await message.answer(texts.tariff_switched(t.title), parse_mode="HTML")
+        else:
+            await message.answer(texts.TOKEN_OK)
+            await message.answer(texts.ABOUT, reply_markup=main_menu())
+    elif result == "used_by_you":
+        if was_activated:
+            await message.answer(texts.ALREADY_ON_THIS_CODE)
+        else:
+            await message.answer(texts.ALREADY_ACTIVATED)
+            await message.answer(texts.ABOUT, reply_markup=main_menu())
+    elif result == "used":
+        await message.answer(texts.CODE_USED_BY_OTHER)
+    else:  # not_found
+        await message.answer(texts.TOKEN_WRONG)
+
+
 @router.message(F.text)
 async def handle_text(message: Message) -> None:
     """
     Любой текст без команды.
-    - Если юзер не активирован — считаем это попыткой ввести код доступа.
-    - Если активирован — отвечает ИИ в выбранном режиме.
+    - Похоже на код доступа → активация или смена тарифа (для всех).
+    - Активирован, не код → отвечает ИИ в выбранном режиме.
+    - Не активирован, не код → подсказка ввести код.
     """
     await db.ensure_user(message.from_user.id, message.from_user.username)
+
+    if tariffs.looks_like_code(message.text):
+        await _redeem_code(message, message.text)
+        return
 
     if await db.is_activated(message.from_user.id):
         await _handle_ai_chat(message)
         return
 
-    # Не активирован — пробуем введённый текст как код доступа.
-    result = await db.try_activate_with_code(message.from_user.id, message.text)
-
-    if result == "ok":
-        await message.answer(texts.TOKEN_OK)
-        await message.answer(texts.ABOUT, reply_markup=main_menu())
-    elif result == "used_by_you":
-        await message.answer(texts.ALREADY_ACTIVATED)
-        await message.answer(texts.ABOUT, reply_markup=main_menu())
-    elif result == "used":
-        await message.answer(texts.CODE_USED_BY_OTHER)
-    else:  # not_found
-        await message.answer(texts.TOKEN_WRONG)
+    # Не активирован и это не код — просим ввести код в нужном формате.
+    await message.answer(texts.TOKEN_WRONG)
